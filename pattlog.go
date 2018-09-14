@@ -19,13 +19,16 @@ const (
 type formatCacheType struct {
 	LastUpdateSeconds    int64
 	shortTime, shortDate string
-	longTime, longDate   string
+	longTime, longDate, utcLongTime   string
+	zone string
+
 }
 
 var formatCache = &formatCacheType{}
 
 // Known format codes:
-// %T - Time (15:04:05 MST)
+// %T - Time (15:04:05.123)
+// %Z - Zone (CST)
 // %t - Time (15:04)
 // %D - Date (2006/01/02)
 // %d - Date (01/02/06)
@@ -49,18 +52,23 @@ func FormatLogRecord(format string, rec *LogRecord) string {
 	if cache.LastUpdateSeconds != secs {
 		month, day, year := rec.Created.Month(), rec.Created.Day(), rec.Created.Year()
 		hour, minute, second := rec.Created.Hour(), rec.Created.Minute(), rec.Created.Second()
-		zone, _ := rec.Created.Zone()
+		utcHour, utcMinute, utcSecond := rec.Created.UTC().Hour(), rec.Created.UTC().Minute(), rec.Created.UTC().Second()
+		_, zone := rec.Created.Zone()
+
 		updated := &formatCacheType{
 			LastUpdateSeconds: secs,
 			shortTime:         fmt.Sprintf("%02d:%02d", hour, minute),
 			shortDate:         fmt.Sprintf("%02d/%02d/%02d", day, month, year%100),
-			longTime:          fmt.Sprintf("%02d:%02d:%02d %s", hour, minute, second, zone),
+			longTime:          fmt.Sprintf("%02d:%02d:%02d", hour, minute, second),
+			utcLongTime:          fmt.Sprintf("%02d:%02d:%02d", utcHour, utcMinute, utcSecond),
 			longDate:          fmt.Sprintf("%04d/%02d/%02d", year, month, day),
+			zone:				fmt.Sprintf("%+02d%02d", zone / 3600, (zone % 3600) / 60),
 		}
 		cache = *updated
 		formatCache = updated
-
 	}
+	millisecond := rec.Created.Nanosecond() / 1000
+
 	//custom format datetime pattern %D{2006-01-02T15:04:05}
 	formatByte := changeDttmFormat(format, rec)
 	// Split the string into pieces by % signs
@@ -72,6 +80,16 @@ func FormatLogRecord(format string, rec *LogRecord) string {
 			switch piece[0] {
 			case 'T':
 				out.WriteString(cache.longTime)
+				if len(piece) > 1 && piece[1] == 's'{
+					ms := fmt.Sprintf(".%03d", millisecond)
+					out.WriteString(ms)
+				}
+			case 'U':
+				out.WriteString(cache.utcLongTime)
+				if len(piece) > 1 && piece[1] == 's'{
+					ms := fmt.Sprintf(".%03d", millisecond)
+					out.WriteString(ms)
+				}
 			case 't':
 				out.WriteString(cache.shortTime)
 			case 'D':
@@ -92,6 +110,8 @@ func FormatLogRecord(format string, rec *LogRecord) string {
 					rec.Category = "DEFAULT"
 				}
 				out.WriteString(rec.Category)
+			case 'Z':
+				out.WriteString(cache.zone)
 			}
 			if len(piece) > 1 {
 				out.Write(piece[1:])
